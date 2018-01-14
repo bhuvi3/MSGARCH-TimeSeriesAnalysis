@@ -1,0 +1,169 @@
+####################################################################################################
+MRS-GARCH
+
+To install dependencies (RHmm) use: install.packages("RHmm", repos="http://R-Forge.R-project.org")
+	
+	install.packages(path_to_package_tar, repos = NULL, type="source")
+
+where path_to_package_tar is the path to the 'RHmm' package source (tar file) attached with the project folder.
+
+Dependencies:
+1. rugarch - GARCH model in R - To install package - install.packages('rugarch')
+2. RHmm - HMM model in R - To install package please follow instructions above
+3. reshape2 - (optional) required to remodel data to plot using ggplot function - To install package - install.packages('reshape2')
+4. ggplot2 - Plotting graphs - To install package - install.packages('ggplot2')
+
+#
+In the following description the line number is represented by '#' corresponding to the MSGARCH.R code.
+
+####################################################################################################
+
+#8.
+data - It is the training data; Load the 'EuStockMarkets' data that is already available in the R. Take first 500 values as the training data. (4 denotes the selection of 4th column from the EuStockMarket dataset, corresponding to the London FTSE values.)
+
+#10.
+Since the aim is to forecast upto 5 values ahead, we are looping from 1 to 5, forecasting one step ahead in each loop.
+
+#12.
+Data is loaded into local variable y inside the loop.
+
+#13.
+HMMFit is a function used to build a Hidden Markov Model on the data. (In our experiment we have chosen 2 states (Regimes)).
+
+#14.
+Viterbi function determines which regime each point (value) belong to. 
+(Detailed explanation - The Viterbi-algorithm computes the most probable path of states for a sequence of observations for a given Hidden Markov Model.
+It returns a viterbiPath - A vector of strings, containing the most probable path of states.)
+In line #17, this is plotted.
+
+#15.
+forwardBackward function calculates the probabilities of the point (value) belonging to different regimes. This is derived from the viterbiPath vector.
+In line #19 this is plotted.
+
+#21.
+Adding a legend to the graph being plotted.
+
+##########################################################
+RESULTS SO FAR :
+Now we know which points belonging to each regime. So further we need to build separate GARCH models for points belonging to different regimes.
+##########################################################
+
+
+
+##########################################################
+#23 to #34.
+Calculating the probability matrix, which determines the probability of shifting from one state/regime to the other.
+Since we have have 2 regimes, we get 4 probabilities i.e (probability of shifting from 1 to 1, 1 to 2, 2 to 2 and 2 to 1; hence a 2x2 matrix as specified in line #34, where state11 to state 22 are the probabilities described above respectively)
+##########################################################
+LINE BY LINE EXPLANATION: 
+
+#23 - The variable 'diff' helps estimate points where the changes in state occur, i.e Path$state which stores the states each point belongs to is subtracted with its neighbour. Thus points where change in state occurs, the value of diff isn't 0.
+
+#24, #25 - State2 stores indexes of points in the dataset considered, which belong to state2, similarly for state1
+
+#26 - Compute unique values in diff, in this case the unique values are 0 (when there is no state change), -1 (change from state2 to state1), 1 (change from state1 to state2)
+
+#27, #28 - compute indexes of change of state from state2 to state1 in #27 and #28 computes state1 to state2 
+
+#29-#32 - computes probability of state change for the PMat which is the probability matrix
+
+# 34 - PMat is the probability matrix with P[i,j] corresponding to change of state from state i, to state j
+
+
+############################################################
+#lines 42 - 87: Determining the most optimal p and q parameters of GARCH for each regime
+Since there are 2 states, we need to build to build 2 GARCH models. Since we know points belonging to each regime, we can build different GARCH model for these regimes using those points.
+
+In order to find the optimal p and q values for each garch models, we sample with different sets of p and q values and then pick the one for which the log likelihood (garch.fit.norm1@fit$LLH) is maximum.
+############################################################
+
+The nested loops in lines #42 and #44 show that we are trying out for p,q from {(1,1), (1,2), (2,1), (2,2)}
+
+#46
+Defines specification (the p and q values; note that since this is GARCH model we are setting the armaOrder to 0 and considering normal distribution) for the GARCH model trying out in this iteration.
+
+#48 and #50.
+Using the above specification, GARCH model is built on state 2 and state 1 respectively.
+Now the Garch model built on State 1 is garch.fit.norm1
+Now the Garch model built on State 2 is garch.fit.norm2
+
+# 53 to #67.
+Finding the max likelihood (given by the garch.fit.norm1@fit$LLH variable) for Garch state 1, and p1 and q1 are updated. They are now the optimal values for regime 1.
+Similarly #70 to #84 calculate the optimal values p2 and q2 for regime 2.
+
+###########################################################
+RESULTS SO FAR:
+Now the optimal values have been found. Now again building the GARCH model with optimal p and q values for both regimes.
+###########################################################
+
+
+#93-94. 
+Applying the most optimal p and q parameters for GARCH models in both the regimes and building the GARCH models. 
+Building the GARCH model for regime 1 using the specification optimat p and q, i.e.,  p1 and q1 derived above.
+
+#97-98.
+Building the GARCH model for regime 2 using the specification optimat p and q, i.e.,  p2 and q2 derived above.
+
+Now the Garch model built on State 1 is garch.fit.norm1
+Now the Garch model built on State 2 is garch.fit.norm2
+=> These are the final GARCH models built on each regime using the optimal p and q parameters.
+
+
+#100.
+statecurrent now holds the state to which the latest point belongs to. (states are contained in the Path$states variable, we are choosing the last one)
+
+#102.
+coef1 - is the vector of coefficients in the GARCH model fit on the regime 1.
+these are in the order - {mu (mean), omega(error), alpha1, alpha2, alpha3 ..., beta1, beta2, beta3 ...} (the number of alpha coefficients is equal to p, and the number of beta terms is equal to q)
+
+Similarly coefficients for the GARCH built on regime 2 are found in line #103.
+
+######
+According to the GARCH equation in order to forecast, we need to multiply square of the residuals (garch.fit.norm1@fit$residuals) (in the last p residual terms) with the alpha coefficients. A residual is the difference between a reading and the previous reading in the dataset (i.e D[n] and D[n-1])
+
+#109 to 112.
+m11 - is the set of residuals^2 for the GARCH model on first regime.
+# 117 to 120
+m21 - is the set of residuals^2 for the GARCH model on second regime.
+
+######
+
+Similarly we need to multiply the square of the conditional variance (garch.fit.norm2@fit$var) with the beta coefficients.
+
+#113 to 116.
+m12 - is the set of conditional variance for the GARCH model on first regime.
+#121 to 124
+m22 - is the set of conditional variance for the GARCH model on second regime.
+######
+
+#126.
+m1 - is the set of term values that must will multiplied with the coefficients.
+for example: consider p = q = 1; consider square of one residual is 0.4 and the conditional variance is 0.2.
+if coefficients are - mu, omega, alpha1, beta1
+then m1 is          - 1 , 1    , 0.4   , 0.2
+
+then sum(coef1 * m1) will give the mu*1 + omega*1 + alpha1*0.4 + beta1*0.2; For Regime 1
+then sum(coef2 * m2) will give the mu*1 + omega*1 + alpha1*0.4 + beta1*0.2; For Regime 2
+
+#129.
+Forecasted value:
+this sum(coef1 * m1) and sum(coef2 * m2) is used in line#129; which gives the estimate of GARCH model for regime 1 and respectively. We take the weighted average of these estimates where the weights are the probabilities from moving from the current state to state 1 and state2 respectively. 
+
+PMat[statecurrent,1] is the probability of changing from current state to state 1; 
+
+PMat[statecurrent,2] is the probability of changing from current state to state 2; 
+(statecurrent holds the current state of the latest point)
+
+#131.
+The estimated forecast is appended to the data, and the whole process runs again for the next forecast going to loop started on line #10.
+
+#########################################################################
+#Plotting and getting RMSE
+
+#137 to 150. 
+Plotting the data and estimates
+Respective RMSE is found.
+
+#154 to 168.
+Plotting the data residuals and estimated residuals.
+Respective RMSE is found.
